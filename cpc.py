@@ -359,7 +359,7 @@ def fine_tune(model_path):
 
     with tf.device('/device:CPU:0'):
         X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
-        Y = tf.placeholder(tf.float32, [None, num_class_per_group])
+        Y = tf.placeholder(tf.float32, [1, num_class_per_group])
 
         for idx, labelname in enumerate(dir_list):
             imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True)
@@ -383,8 +383,9 @@ def fine_tune(model_path):
                         teY.append(label)
                         teX.append(img)
 
-        print(trX.shape)
+        trX = np.array(trX)
         trX = trX.reshape((-1, input_height, input_width, num_channel))
+        print(trX.shape)
 
     bn_train = tf.placeholder(tf.bool)
     keep_prob = tf.placeholder(tf.float32)
@@ -396,10 +397,14 @@ def fine_tune(model_path):
     context = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob)
     context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True)
 
-    prediction = layers.fc(context, num_class_per_group, scope='g_fc_final')
-
     cpc_loss, cpc_logits = CPC(context)
     softmax_cpc_logits = tf.nn.softmax(logits=cpc_logits)
+
+    context = tf.reshape(context, [1, -1])
+    print('Context: ' + str(context.get_shape().as_list()))
+
+    prediction = layers.fc(context, num_class_per_group, scope='g_fc_final')
+    print('Prediction: ' + str(prediction.get_shape().as_list()))
 
     softmax_temprature = 0.07
 
@@ -439,14 +444,11 @@ def fine_tune(model_path):
                 #print('Patch Shape: ', patches.shape)
 
                 _, l = sess.run([class_optimizer, class_loss],
-                                feed_dict={X: patches, Y: trY[iteration], bn_train: True, keep_prob: 1.0})
+                                feed_dict={X: patches, Y: [trY[iteration]], bn_train: True, keep_prob: 1.0})
                 iteration = iteration + 1
 
                 if iteration % 10 == 0:
                     print('epoch: ' + str(i) + ', loss: ' + str(l))
-
-
-
 
             try:
                 saver.save(sess, model_path)

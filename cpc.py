@@ -217,7 +217,7 @@ def task(x, activation='relu', output_dim=256, scope='task_network', reuse=False
         else:
             act_func = tf.nn.sigmoid
 
-        print('layer1: ' + str(x.get_shape().as_list()))
+        print('Task Layer1: ' + str(x.get_shape().as_list()))
 
         #l = layers.self_attention(l, dense_block_depth)
 
@@ -378,8 +378,9 @@ def validate(model_path):
     print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
     latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
+    print('Task Latent Dims: ' + str(latent.get_shape().as_list()))
 
-    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=tf.nn.relu, scope='fc_final')
+    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=None, scope='fc_final')
     print('Prediction: ' + str(prediction.get_shape().as_list()))
 
     softmax_temprature = 0.07
@@ -461,7 +462,7 @@ def fine_tune(model_path):
 
         trX = np.array(trX)
         trX = trX.reshape((-1, input_height, input_width, num_channel))
-        print(trX.shape)
+        #print(trX.shape)
 
     bn_train = tf.placeholder(tf.bool)
     keep_prob = tf.placeholder(tf.float32)
@@ -478,8 +479,9 @@ def fine_tune(model_path):
     print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
     latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
+    print('Task Latent Dims: ' + str(latent.get_shape().as_list()))
 
-    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=tf.nn.relu, scope='fc_final')
+    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=None, scope='fc_final')
     print('Prediction: ' + str(prediction.get_shape().as_list()))
 
     softmax_temprature = 0.07
@@ -519,14 +521,15 @@ def fine_tune(model_path):
                 #Prepare patch images
                 patches = prepare_patches(trX[iteration])
 
-                _, l = sess.run([class_optimizer, class_loss],
+                _, l, c = sess.run([class_optimizer, class_loss, confidence_op],
                                 feed_dict={X: patches, Y: [trY[iteration]], bn_train: True, keep_prob: 1.0})
                 iteration = iteration + 1
 
                 if iteration % 100 == 0:
-                    print('epoch: ' + str(i) + ', loss: ' + str(l))
+                    print('epoch: ' + str(i) + ', loss: ' + str(l) + ', Y: ' + str(trY[iteration]) + ', Pred: ' + str(c))
 
             try:
+                saver = tf.train.Saver()
                 saver.save(sess, model_path)
             except:
                 print('Save failed')

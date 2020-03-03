@@ -251,7 +251,7 @@ def global_avg_pool(input_data, output_length=1, padding='VALID', use_bias=False
     height = input_dims[1]
     width = input_dims[2]
 
-    with tf.variable_scope(scope):
+    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         if output_length == 1:
             pool = tf.nn.avg_pool(input_data, [1, height, width, 1], strides=[1, 1, 1, 1], padding=padding)
             pool = tf.reduce_mean(pool, axis=[1, 2])

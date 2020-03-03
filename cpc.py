@@ -106,12 +106,9 @@ def pixelCNN(latents, num_iteration=5, depth=256, scope='pixel_cnn'):
 def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predict=3, scope='cpc'):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         loss = 0.0
-        print('Latent shape: ' + str(latents.get_shape().as_list()))
-
-        latents = tf.reshape(latents, shape=[1, num_context_patches, num_context_patches, representation_dim])
         context = pixelCNN(latents)
-
         print('PixelCNN Context Shape: ' + str(context.get_shape().as_list()))
+
         targets = layers.conv(latents, scope='conv1', filter_dims=[1, 1, target_dim], stride_dims=[1, 1],
                               non_linear_fn=None, bias=True)
         batch_dim, col_dim, row_dim = targets.get_shape().as_list()[:-1]
@@ -206,6 +203,71 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
     return tf.add(l, in_layer)
 
 
+def task(x, activation='relu', output_dim=256, scope='task_network', reuse=False, bn_phaze=False, keep_prob=0.5):
+    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        # if reuse:
+        #    tf.get_variable_scope().reuse_variables()
+
+        if activation == 'swish':
+            act_func = util.swish
+        elif activation == 'relu':
+            act_func = tf.nn.relu
+        elif activation == 'lrelu':
+            act_func = tf.nn.leaky_relu
+        else:
+            act_func = tf.nn.sigmoid
+
+        print('layer1: ' + str(x.get_shape().as_list()))
+
+        #l = layers.self_attention(l, dense_block_depth)
+
+        l = x
+
+        l = layers.conv(l, scope='conv1', filter_dims=[3, 3, dense_block_depth], stride_dims=[1, 1],
+                        non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_1',
+                                    stochastic_depth=False, stochastic_survive=0.7)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_2',
+                                    stochastic_depth=False, stochastic_survive=0.65)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_3',
+                                    stochastic_depth=False, stochastic_survive=0.6)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_4',
+                                    stochastic_depth=False, stochastic_survive=0.6)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_5',
+                                    stochastic_depth=False, stochastic_survive=0.6)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_6',
+                                    stochastic_depth=False, stochastic_survive=0.6)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_8',
+                                    stochastic_depth=False, stochastic_survive=0.5)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_9',
+                                    stochastic_depth=True, stochastic_survive=0.5)
+
+        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
+                                    act_func=act_func, bn_phaze=bn_phaze, scope='block_10')
+
+        l = act_func(l)
+
+        latent = layers.global_avg_pool(l, output_length=output_dim)
+
+    return latent
+
+
 def encoder(x, activation='relu', scope='encoder_network', reuse=False, bn_phaze=False, keep_prob=0.5):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # if reuse:
@@ -285,7 +347,7 @@ def encoder(x, activation='relu', scope='encoder_network', reuse=False, bn_phaze
 
 
 def validate(model_path):
-    trX = []
+    trX = np.empty([0, input_height, input_width, 3], dtype=int)
 
     dir_list = os.listdir(imgs_dirname)
     dir_list.sort(key=str.lower)
@@ -308,14 +370,28 @@ def validate(model_path):
     config = tf.ConfigProto(allow_soft_placement=True)
     config.gpu_options.allow_growth = True
 
-    context = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob)
-    context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True)
+    latent = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='encoder')
+    print('Encoder latent: ' + str(latent.get_shape().as_list()))
 
-    prediction = layers.fc(context, num_class_per_group, scope='g_fc_final')
+    latent = layers.global_avg_pool(latent, output_length=representation_dim, use_bias=True, scope='gp')
+    latent = tf.reshape(latent, [1, num_context_patches, num_context_patches, -1])
+    print('Latent Dims: ' + str(latent.get_shape().as_list()))
+
+    latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
+
+    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=tf.nn.relu, scope='fc_final')
+    print('Prediction: ' + str(prediction.get_shape().as_list()))
+
+    softmax_temprature = 0.07
+
+    class_loss = tf.reduce_mean(
+        tf.losses.softmax_cross_entropy(onehot_labels=Y, logits=(prediction / softmax_temprature)))
 
     # training operation
     predict_op = tf.argmax(tf.nn.softmax(prediction), 1)
     confidence_op = tf.nn.softmax(prediction)
+
+    class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
 
     # Launch the graph in a session
     with tf.Session(config=config) as sess:
@@ -340,9 +416,9 @@ def validate(model_path):
                 # print('Patch Shape: ', patches.shape)
 
                 pred, conf = sess.run([predict_op, confidence_op],
-                                feed_dict={X: patches,bn_train: True, keep_prob: 1.0})
+                                feed_dict={X: patches, bn_train: False, keep_prob: 1.0})
 
-                print('Prediction: ' + str(pred) + ', Confidence: ' + str(conf))
+                print('Prediction: ' + str(dir_list[pred[0]]) + ', Confidence: ' + str(conf[0][pred[0]]))
 
 
 def fine_tune(model_path):
@@ -394,16 +470,16 @@ def fine_tune(model_path):
     config = tf.ConfigProto(allow_soft_placement=True)
     config.gpu_options.allow_growth = True
 
-    context = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob)
-    context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True)
+    latent = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='encoder')
+    print('Encoder latent: ' + str(latent.get_shape().as_list()))
 
-    cpc_loss, cpc_logits = CPC(context)
-    softmax_cpc_logits = tf.nn.softmax(logits=cpc_logits)
+    latent = layers.global_avg_pool(latent, output_length=representation_dim, use_bias=True, scope='gp')
+    latent = tf.reshape(latent, [1, num_context_patches, num_context_patches, -1])
+    print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
-    context = tf.reshape(context, [1, -1])
-    print('Context: ' + str(context.get_shape().as_list()))
+    latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
 
-    prediction = layers.fc(context, num_class_per_group, scope='g_fc_final')
+    prediction = layers.fc(latent, num_class_per_group, non_linear_fn=tf.nn.relu, scope='fc_final')
     print('Prediction: ' + str(prediction.get_shape().as_list()))
 
     softmax_temprature = 0.07
@@ -412,25 +488,27 @@ def fine_tune(model_path):
         tf.losses.softmax_cross_entropy(onehot_labels=Y, logits=(prediction / softmax_temprature)))
 
     # training operation
-    c_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
     predict_op = tf.argmax(tf.nn.softmax(prediction), 1)
     confidence_op = tf.nn.softmax(prediction)
 
-    cpc_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(cpc_loss)
     class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
 
     # Launch the graph in a session
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
 
-        # print([n.name for n in tf.get_default_graph().as_graph_def().node if 'weight' in n.name])
-
         try:
             saver = tf.train.Saver()
             saver.restore(sess, model_path)
-            print('Model loaded')
+            print('Model Restored')
         except:
-            print('Start New Training. Wait ...')
+            try:
+                variables_to_restore = [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'encoder']
+                saver = tf.train.Saver(variables_to_restore)
+                saver.restore(sess, model_path)
+                print('Partial Model Restored')
+            except:
+                print('Start New Training. Wait ...')
 
         iteration = 0
 
@@ -441,13 +519,11 @@ def fine_tune(model_path):
                 #Prepare patch images
                 patches = prepare_patches(trX[iteration])
 
-                #print('Patch Shape: ', patches.shape)
-
                 _, l = sess.run([class_optimizer, class_loss],
                                 feed_dict={X: patches, Y: [trY[iteration]], bn_train: True, keep_prob: 1.0})
                 iteration = iteration + 1
 
-                if iteration % 10 == 0:
+                if iteration % 100 == 0:
                     print('epoch: ' + str(i) + ', loss: ' + str(l))
 
             try:
@@ -456,7 +532,7 @@ def fine_tune(model_path):
                 print('Save failed')
 
 
-def train(model_path):
+def pretrain(model_path):
     trX = np.empty([0, input_height, input_width, 3], dtype=int)
 
     dir_list = os.listdir(imgs_dirname)
@@ -470,7 +546,7 @@ def train(model_path):
             #print(trX.shape, imgs_list.shape)
             trX = np.concatenate((trX, imgs_list), axis=0)
 
-        print(trX.shape)
+        #print(trX.shape)
         trX = trX.reshape((-1, input_height, input_width, num_channel))
 
     bn_train = tf.placeholder(tf.bool)
@@ -480,11 +556,14 @@ def train(model_path):
     config = tf.ConfigProto(allow_soft_placement=True)
     config.gpu_options.allow_growth = True
 
-    context = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob)
+    context = encoder(X, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='encoder')
+    print('Encoder Dims: ' + str(context.get_shape().as_list()))
 
-    context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True)
+    context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True, scope='gp')
+    context = tf.reshape(context, [1, num_context_patches, num_context_patches, -1])
+    print('Context Dims: ' + str(context.get_shape().as_list()))
 
-    cpc_loss, cpc_logits = CPC(context)
+    cpc_loss, cpc_logits = CPC(context, scope='cpc')
 
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(cpc_loss)
 
@@ -494,12 +573,10 @@ def train(model_path):
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
 
-        # print([n.name for n in tf.get_default_graph().as_graph_def().node if 'weight' in n.name])
-
         try:
             saver = tf.train.Saver()
             saver.restore(sess, model_path)
-            print('Model loaded')
+            print('Model Restored')
         except:
             print('Start New Training. Wait ...')
 
@@ -509,8 +586,6 @@ def train(model_path):
             for iteration in range(len(trX)):
                 #Prepare patch images
                 patches = prepare_patches(trX[iteration])
-
-                #print('Patch Shape: ', patches.shape)
 
                 _, l, s_logit, c_logits = sess.run([optimizer, cpc_loss, softmax_cpc_logits, cpc_logits],
                                 feed_dict={X: patches, bn_train: True, keep_prob: 1.0})
@@ -524,18 +599,6 @@ def train(model_path):
                 saver.save(sess, model_path)
             except:
                 print('Save failed')
-
-            '''
-            training_batch = zip(range(0, len(trX), batch_size),
-                                 range(batch_size, len(trX) + 1, batch_size))
-
-            for start, end in training_batch:
-                _, l = sess.run([optimizer, cpc_loss], feed_dict={X: trX[start: end], bn_train: True, keep_prob: 1.0})
-                iteration = iteration + 1
-
-                if iteration % 10 == 0:
-                    print('epoch: ' + str(i) + ', loss: ' + str(l))
-            '''
 
 
 def test(model_path):
@@ -572,7 +635,7 @@ if __name__ == '__main__':
     patch_size = 24
 
     dense_block_depth = 128
-    representation_dim = 1024
+    representation_dim = 256
     num_context_patches = 7
 
     scale_size = 110
@@ -582,7 +645,10 @@ if __name__ == '__main__':
 
     if mode == 'train':
         num_class_per_group = len(os.listdir(imgs_dirname))
-        train(model_path)
+        pretrain(model_path)
     elif mode == 'fine_tune':
         num_class_per_group = len(os.listdir(imgs_dirname))
         fine_tune(model_path)
+    elif mode == 'validate':
+        num_class_per_group = len(os.listdir(imgs_dirname))
+        validate(model_path)

@@ -347,21 +347,11 @@ def encoder(x, activation='relu', scope='encoder_network', reuse=False, bn_phaze
 
 
 def validate(model_path):
-    trX = np.empty([0, input_height, input_width, 3], dtype=int)
+    label_list = os.listdir(label_directory)
+    label_list.sort(key=str.lower)
 
-    dir_list = os.listdir(imgs_dirname)
-    dir_list.sort(key=str.lower)
-
-    with tf.device('/device:CPU:0'):
-        X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
-
-        for idx, labelname in enumerate(dir_list):
-            imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=False)
-            # print(trX.shape, imgs_list.shape)
-            trX = np.concatenate((trX, imgs_list), axis=0)
-
-        print(trX.shape)
-        trX = trX.reshape((-1, input_height, input_width, num_channel))
+    X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
+    Y = tf.placeholder(tf.float32, [1, num_class_per_group])
 
     bn_train = tf.placeholder(tf.bool)
     keep_prob = tf.placeholder(tf.float32)
@@ -383,51 +373,47 @@ def validate(model_path):
     prediction = layers.fc(latent, num_class_per_group, non_linear_fn=None, scope='fc_final')
     print('Prediction: ' + str(prediction.get_shape().as_list()))
 
-    softmax_temprature = 0.07
-
-    class_loss = tf.reduce_mean(
-        tf.losses.softmax_cross_entropy(onehot_labels=Y, logits=(prediction / softmax_temprature)))
-
     # training operation
     predict_op = tf.argmax(tf.nn.softmax(prediction), 1)
     confidence_op = tf.nn.softmax(prediction)
-
-    class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
 
     # Launch the graph in a session
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
 
-        # print([n.name for n in tf.get_default_graph().as_graph_def().node if 'weight' in n.name])
-
         try:
             saver = tf.train.Saver()
             saver.restore(sess, model_path)
-            print('Model loaded')
+            print('Model Loaded')
         except:
-            print('Start New Training. Wait ...')
+            print('Model Load Failed')
+            return
 
-        iteration = 0
+        print('Validation Data Directory: ' + test_data)
 
-        for i in range(num_epoch):
-            for iteration in range(len(trX)):
-                # Prepare patch images
-                patches = prepare_patches(trX[iteration])
+        for idx, labelname in enumerate(os.listdir(test_data)):
+            if os.path.isdir(os.path.join(imgs_dirname, labelname).replace("\\", "/")) is False:
+                continue
 
-                # print('Patch Shape: ', patches.shape)
+            test_label_dir = os.path.join(test_data, labelname).replace("\\", "/")
+            img_files = os.listdir(test_label_dir)
+
+            for f in img_files:
+                bgrImg = cv2.imread(os.path.join(test_label_dir, f).replace("\\", "/"))
+                img = cv2.cvtColor(bgrImg, cv2.COLOR_BGR2RGB)
+
+                img = img / 255.0
+                patches = prepare_patches(img)
 
                 pred, conf = sess.run([predict_op, confidence_op],
-                                feed_dict={X: patches, bn_train: False, keep_prob: 1.0})
+                              feed_dict={X: patches, bn_train: False, keep_prob: 1.0})
 
-                print('Prediction: ' + str(dir_list[pred[0]]) + ', Confidence: ' + str(conf[0][pred[0]]))
+                print(labelname + ', Prediction: ' + str(label_list[pred[0]]) + ', Confidence: ' + str(conf[0][pred[0]]))
 
 
 def fine_tune(model_path):
     trX = []
     trY = []
-
-    teX = []
-    teY = []
 
     dir_list = os.listdir(imgs_dirname)
     dir_list.sort(key=str.lower)
@@ -450,15 +436,9 @@ def fine_tune(model_path):
                 label[idx] += 1
 
             #print('label:', labelname, label)
-
             for idx2, img in enumerate(imgs_list):
-                if idx2 < len(imgs_list) * 0.8:
-                    trY.append(label)
-                    trX.append(img)
-                else:
-                    if labelname != 'Unknown':
-                        teY.append(label)
-                        teX.append(img)
+                trY.append(label)
+                trX.append(img)
 
         trX = np.array(trX)
         trX = trX.reshape((-1, input_height, input_width, num_channel))
@@ -484,7 +464,8 @@ def fine_tune(model_path):
     prediction = layers.fc(latent, num_class_per_group, non_linear_fn=None, scope='fc_final')
     print('Prediction: ' + str(prediction.get_shape().as_list()))
 
-    softmax_temprature = 0.07
+    #softmax_temprature = 0.07
+    softmax_temprature = 1.0
 
     class_loss = tf.reduce_mean(
         tf.losses.softmax_cross_entropy(onehot_labels=Y, logits=(prediction / softmax_temprature)))
@@ -525,7 +506,7 @@ def fine_tune(model_path):
                                 feed_dict={X: patches, Y: [trY[iteration]], bn_train: True, keep_prob: 1.0})
                 iteration = iteration + 1
 
-                if iteration % 100 == 0:
+                if iteration % 50 == 0:
                     print('epoch: ' + str(i) + ', loss: ' + str(l) + ', Y: ' + str(trY[iteration]) + ', Pred: ' + str(c))
 
             try:
@@ -604,10 +585,6 @@ def pretrain(model_path):
                 print('Save failed')
 
 
-def test(model_path):
-    pass
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
@@ -627,6 +604,7 @@ if __name__ == '__main__':
 
     imgs_dirname = args.train_data
     label_directory = args.label
+    test_data = args.test_data
 
     input_height = 96
     input_width = 96
@@ -638,7 +616,7 @@ if __name__ == '__main__':
     patch_size = 24
 
     dense_block_depth = 128
-    representation_dim = 256
+    representation_dim = 1024
     num_context_patches = 7
 
     scale_size = 110
@@ -653,5 +631,5 @@ if __name__ == '__main__':
         num_class_per_group = len(os.listdir(imgs_dirname))
         fine_tune(model_path)
     elif mode == 'validate':
-        num_class_per_group = len(os.listdir(imgs_dirname))
+        num_class_per_group = len(os.listdir(label_directory))
         validate(model_path)

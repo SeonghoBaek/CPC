@@ -143,7 +143,7 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
             onehot_labels = []
 
             for idx in labels:
-                onehot = np.zeros(col_dim * row_dim)
+                onehot = np.zeros(batch_dim * col_dim * row_dim)
                 onehot[idx] = 1
                 onehot_labels.append(onehot)
 
@@ -347,8 +347,8 @@ def validate(model_path):
     label_list = os.listdir(label_directory)
     label_list.sort(key=str.lower)
 
-    X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
-    Y = tf.placeholder(tf.float32, [1, num_class_per_group])
+    X = tf.placeholder(tf.float32, [batch_size * mini_batch_size, patch_height, patch_width, num_channel])
+    Y = tf.placeholder(tf.float32, [batch_size, num_class_per_group])
 
     bn_train = tf.placeholder(tf.bool)
     keep_prob = tf.placeholder(tf.float32)
@@ -361,7 +361,9 @@ def validate(model_path):
     print('Encoder latent: ' + str(latent.get_shape().as_list()))
 
     latent = layers.global_avg_pool(latent, output_length=representation_dim, use_bias=True, scope='gp')
-    latent = tf.reshape(latent, [1, num_context_patches, num_context_patches, -1])
+    print('GP Dims: ' + str(latent.get_shape().as_list()))
+
+    latent = tf.reshape(latent, [batch_size, num_context_patches, num_context_patches, -1])
     print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
     latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
@@ -418,8 +420,8 @@ def fine_tune(model_path):
     one_hot_length = len(os.listdir(imgs_dirname))
 
     with tf.device('/device:CPU:0'):
-        X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
-        Y = tf.placeholder(tf.float32, [1, num_class_per_group])
+        X = tf.placeholder(tf.float32, [batch_size * mini_batch_size, patch_height, patch_width, num_channel])
+        Y = tf.placeholder(tf.float32, [batch_size, num_class_per_group])
 
         for idx, labelname in enumerate(dir_list):
             imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True, add_noize=True)
@@ -452,7 +454,9 @@ def fine_tune(model_path):
     print('Encoder latent: ' + str(latent.get_shape().as_list()))
 
     latent = layers.global_avg_pool(latent, output_length=representation_dim, use_bias=True, scope='gp')
-    latent = tf.reshape(latent, [1, num_context_patches, num_context_patches, -1])
+    print('GP Dims: ' + str(latent.get_shape().as_list()))
+
+    latent = tf.reshape(latent, [batch_size, num_context_patches, num_context_patches, -1])
     print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
     latent = task(latent, output_dim=512, activation='relu', bn_phaze=bn_train, keep_prob=keep_prob, scope='task')
@@ -492,24 +496,29 @@ def fine_tune(model_path):
             except:
                 print('Start New Training. Wait ...')
 
-        iteration = 0
+        training_batches = zip(range(0, len(trX), batch_size),
+                               range(batch_size, len(trX) + 1, batch_size))
 
-        for i in range(num_epoch):
+        for e in range(num_epoch):
             trX, trY = shuffle(trX, trY)
+            iteration = 0
 
-            for iteration in range(len(trX)):
-                #Prepare patch images
-                patches = prepare_patches(trX[iteration])
+            for start, end in training_batches:
+                patches = np.empty([0, patch_height, patch_width, num_channel])
+
+                for i in range(batch_size):
+                    p = prepare_patches(trX[start + i])
+                    patches = np.concatenate((patches, p), axis=0)
 
                 _, l, c = sess.run([class_optimizer, class_loss, confidence_op],
-                                feed_dict={X: patches, Y: [trY[iteration]], bn_train: True, keep_prob: 1.0})
+                                   feed_dict={X: patches, Y: [trY[start:end]], bn_train: True, keep_prob: 1.0})
+
                 iteration = iteration + 1
 
-                if iteration % 50 == 0:
-                    print('epoch: ' + str(i) + ', loss: ' + str(l) + ', Y: ' + str(trY[iteration]) + ', Pred: ' + str(c))
+                if iteration % 10 == 0:
+                    print('epoch: ' + str(e) + ', loss: ' + str(l))
 
             try:
-                saver = tf.train.Saver()
                 saver.save(sess, model_path)
             except:
                 print('Save failed')
@@ -522,7 +531,7 @@ def pretrain(model_path):
     dir_list.sort(key=str.lower)
 
     with tf.device('/device:CPU:0'):
-        X = tf.placeholder(tf.float32, [batch_size, patch_height, patch_width, num_channel])
+        X = tf.placeholder(tf.float32, [batch_size * mini_batch_size, patch_height, patch_width, num_channel])
 
         for idx, labelname in enumerate(dir_list):
             imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True)
@@ -543,7 +552,9 @@ def pretrain(model_path):
     print('Encoder Dims: ' + str(context.get_shape().as_list()))
 
     context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True, scope='gp')
-    context = tf.reshape(context, [1, num_context_patches, num_context_patches, -1])
+    print('GP Dims: ' + str(context.get_shape().as_list()))
+
+    context = tf.reshape(context, [batch_size, num_context_patches, num_context_patches, -1])
     print('Context Dims: ' + str(context.get_shape().as_list()))
 
     cpc_loss, cpc_logits = CPC(context, scope='cpc')
@@ -563,20 +574,28 @@ def pretrain(model_path):
         except:
             print('Start New Training. Wait ...')
 
-        iteration = 0
+        training_batches = zip(range(0, len(trX), batch_size),
+                               range(batch_size, len(trX) + 1, batch_size))
 
-        for i in range(num_epoch):
-            for iteration in range(len(trX)):
-                #Prepare patch images
-                patches = prepare_patches(trX[iteration])
+        for e in range(num_epoch):
+            trX = shuffle(trX)
+            iteration = 0
+
+            for start, end in training_batches:
+                patches = np.empty([0, patch_height, patch_width, num_channel])
+
+                for i in range(batch_size):
+                    p = prepare_patches(trX[start + i])
+                    patches = np.concatenate((patches, p), axis=0)
 
                 _, l, s_logit, c_logits = sess.run([optimizer, cpc_loss, softmax_cpc_logits, cpc_logits],
                                 feed_dict={X: patches, bn_train: True, keep_prob: 1.0})
+
                 iteration = iteration + 1
 
                 if iteration % 10 == 0:
-                    #print('epoch: ' + str(i) + ', loss: ' + str(l) + ', softmax: ' + str(s_logit[0]) + ', logit: ' + str(c_logits[0]))
-                    print('epoch: ' + str(i) + ', loss: ' + str(l))
+                    #print('epoch: ' + str(e) + ', loss: ' + str(l) + ', softmax: ' + str(s_logit[0]) + ', logit: ' + str(c_logits[0]))
+                    print('epoch: ' + str(e) + ', loss: ' + str(l))
 
             try:
                 saver.save(sess, model_path)
@@ -621,7 +640,8 @@ if __name__ == '__main__':
     scale_size = 110
     num_aug_patch = 4
     num_epoch = 10
-    batch_size = num_context_patches * num_context_patches
+    batch_size = 4
+    mini_batch_size = num_context_patches * num_context_patches
 
     if mode == 'train':
         num_class_per_group = len(os.listdir(imgs_dirname))
@@ -631,4 +651,5 @@ if __name__ == '__main__':
         fine_tune(model_path)
     elif mode == 'validate':
         num_class_per_group = len(os.listdir(label_directory))
+        batch_size = 1
         validate(model_path)

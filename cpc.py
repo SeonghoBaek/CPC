@@ -33,11 +33,10 @@ def load_images_from_folder(folder, use_augmentation=False, add_noize=False):
         fullname = os.path.join(folder, filename).replace("\\", "/")
         jpg_img = cv2.imread(fullname)
         img = cv2.cvtColor(jpg_img, cv2.COLOR_BGR2RGB)  # To RGB format
-        grey_img = cv2.cvtColor(jpg_img, cv2.COLOR_BGR2GRAY)
+        img = cv2.resize(img, dsize=(input_height, input_width))
 
         if img is not None:
             img = np.array(img)
-            grey_img = np.array(grey_img)
 
             n_img = img / 255.0
             images.append(n_img)
@@ -144,20 +143,18 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
             onehot_labels = []
 
             for idx in labels:
-                onehot = np.zeros(49)
+                onehot = np.zeros(col_dim * row_dim)
                 onehot[idx] = 1
                 onehot_labels.append(onehot)
 
             onehot_labels = np.array(onehot_labels)
-
-            #l = tf.constant(onehot_labels)
-
+            onehot_labels = tf.constant(onehot_labels)
             #print('Onehot: ', onehot_labels[0])
 
             #loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logits))
 
             #loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logits)
-            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=onehot_labels, logits=logits))
+            loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels=onehot_labels, logits=logits))
             #loss = tf.losses.softmax_cross_entropy(onehot_labels=label, logits=logits)
             #loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=label, logits=logits))
 
@@ -425,7 +422,7 @@ def fine_tune(model_path):
         Y = tf.placeholder(tf.float32, [1, num_class_per_group])
 
         for idx, labelname in enumerate(dir_list):
-            imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True)
+            imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True, add_noize=True)
             #print(trX.shape, imgs_list.shape)
             label = np.zeros(one_hot_length)
 
@@ -486,7 +483,9 @@ def fine_tune(model_path):
             print('Model Restored')
         except:
             try:
-                variables_to_restore = [v for v in tf.trainable_variables() if v.name.split('/')[0] == 'encoder']
+                variables_to_restore = [v for v in tf.trainable_variables()
+                                        if v.name.split('/')[0] == 'encoder'
+                                        or v.name.split('/')[0] == 'gp']
                 saver = tf.train.Saver(variables_to_restore)
                 saver.restore(sess, model_path)
                 print('Partial Model Restored')
@@ -621,7 +620,7 @@ if __name__ == '__main__':
 
     scale_size = 110
     num_aug_patch = 4
-    num_epoch = 300
+    num_epoch = 10
     batch_size = num_context_patches * num_context_patches
 
     if mode == 'train':

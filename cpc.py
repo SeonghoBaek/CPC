@@ -129,7 +129,7 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
 
             print('logits: ' + str(logits.get_shape().as_list()))
 
-            b = [x / (col_dim_i * row_dim) for x in range(total_elements)]
+            b = [x // (col_dim_i * row_dim) for x in range(total_elements)]
             #print(b)
             col = [x % (col_dim_i * row_dim) for x in range(total_elements)]
             #print(col)

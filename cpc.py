@@ -574,12 +574,12 @@ def pretrain(model_path):
         except:
             print('Start New Training. Wait ...')
 
-        training_batches = zip(range(0, len(trX), batch_size),
-                               range(batch_size, len(trX) + 1, batch_size))
-
         for e in range(num_epoch):
             trX = shuffle(trX)
             iteration = 0
+
+            training_batches = zip(range(0, len(trX), batch_size),
+                                   range(batch_size, len(trX) + 1, batch_size))
 
             for start, end in training_batches:
                 patches = np.empty([0, patch_height, patch_width, num_channel])

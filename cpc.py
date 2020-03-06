@@ -519,6 +519,7 @@ def fine_tune(model_path):
                     print('epoch: ' + str(e) + ', loss: ' + str(l))
 
             try:
+                saver = tf.train.Saver()
                 saver.save(sess, model_path)
             except:
                 print('Save failed')

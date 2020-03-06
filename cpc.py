@@ -511,7 +511,7 @@ def fine_tune(model_path):
                     patches = np.concatenate((patches, p), axis=0)
 
                 _, l, c = sess.run([class_optimizer, class_loss, confidence_op],
-                                   feed_dict={X: patches, Y: [trY[start:end]], bn_train: True, keep_prob: 1.0})
+                                   feed_dict={X: patches, Y: trY[start:end], bn_train: True, keep_prob: 1.0})
 
                 iteration = iteration + 1
 

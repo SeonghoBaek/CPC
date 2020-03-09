@@ -429,3 +429,34 @@ def spectral_norm(w, iteration=1, scope='sn'):
             w_norm = tf.reshape(w_norm, w_shape)
 
     return w_norm
+
+
+def moments_for_layer_norm(x, axes=1, name=None):
+    # output for mean and variance should be [batch_size]
+    # from https://github.com/LeavesBreathe/tensorflow_with_latest_papers
+    epsilon = 1e-3  # found this works best.
+
+    if not isinstance(axes, list):
+        axes = [axes]
+
+    mean = tf.reduce_mean(x, axes, keep_dims=True)
+    variance = tf.sqrt(tf.reduce_mean(tf.square(x - mean), axes, keep_dims=True) + epsilon)
+
+    return mean, variance
+
+
+def layer_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
+    # derived from:
+    # https://github.com/LeavesBreathe/tensorflow_with_latest_papers, but simplified.
+    with tf.variable_scope(scope):
+        num_units = x.get_shape().as_list()[1]
+
+        alpha = tf.get_variable('alpha', [num_units],
+                                initializer=tf.constant_initializer(alpha_start), dtype=tf.float32)
+        bias = tf.get_variable('bias', [num_units],
+                               initializer=tf.constant_initializer(bias_start), dtype=tf.float32)
+
+        mean, variance = moments_for_layer_norm(x)
+        y = (alpha * (x - mean)) / (variance) + bias
+    return y
+

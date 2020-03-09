@@ -13,7 +13,7 @@
 
 >Flow: Input Image -> Make Patches -> Encoding -> Pixel CNN -> CPC
 
->Encoder: ResDense Block + Global AVG Pool, No Pooling Layer(Conv Only), Batch Norm and Self Attention.
+>Encoder: ResDense Block + Global AVG Pool, No Pooling Layer(Conv Only), Batch Norm(Fine Tune Only) and Self Attention.
 
 >***ResDense Block is*** dense convolution block with residual connection(See JointCenterLoss). 
 

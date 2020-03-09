@@ -72,7 +72,7 @@ def user_grouping(path, size):
         group_id = group_id + 1
 
 
-def random_sample(path, ratio, out_dir, num_batch=4):
+def random_sample(path, ratio, out_dir, num_batch=8):
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir)
 
@@ -118,4 +118,5 @@ def random_sample(path, ratio, out_dir, num_batch=4):
             shutil.copy(src, dst)
 
 
+# From input directory, 10% random sample, output to class_input directory. Optional, set traing batch size.
 random_sample(os.path.abspath('input'), 10, os.path.abspath('class_input'))

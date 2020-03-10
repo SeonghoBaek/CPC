@@ -193,13 +193,18 @@ def batch_norm_conv(x, b_train, scope):
         return normed
 
 
-def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer',
-                    use_bn=True, bn_phaze=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
+def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer', norm='layer',
+                    b_train=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
     with tf.variable_scope(scope):
         l = layer
 
-        if use_bn:
-            l = batch_norm_conv(l, b_train=bn_phaze, scope='bn')
+        if norm == 'layer':
+            in_dims = layer.get_shape().as_list()
+            l = tf.reshape(l, [in_dims[0], -1])
+            l = layer_norm(l, scope='ln')
+            l = tf.reshape(l, in_dims)
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
         l = act_func(l)
         l = conv(l, scope='conv', filter_dims=filter_dims, stride_dims=[1, 1], dilation=dilation,
@@ -210,12 +215,17 @@ def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer'
 
 
 def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_layer',
-                       use_bn=True, bn_phaze=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
+                       norm='layer', b_train=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
     with tf.variable_scope(scope):
         l = layer
 
-        if use_bn:
-            l = batch_norm_conv(l, b_train=bn_phaze, scope='bn')
+        if norm == 'layer':
+            in_dims = layer.get_shape().as_list()
+            l = tf.reshape(l, [in_dims[0], -1])
+            l = layer_norm(l, scope='ln')
+            l = tf.reshape(l, in_dims)
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
         l = act_func(l)
         l = conv(l, scope='conv', filter_dims=filter_dims, stride_dims=[1, 1],
@@ -225,14 +235,19 @@ def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_
 
 
 def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=tf.nn.relu, scope='transition',
-                               use_bn=True, bn_phaze=False, use_pool=True, use_bias=False, sn=False):
+                               norm='layer', bn_phaze=False, use_pool=True, use_bias=False, sn=False):
     with tf.variable_scope(scope):
-        if use_bn:
-            l = batch_norm_conv(layer, b_train=bn_phaze, scope='bn')
-            l = act_func(l)
-        else:
-            l = act_func(layer)
+        l = layer
 
+        if norm == 'layer':
+            in_dims = layer.get_shape().as_list()
+            l = tf.reshape(l, [in_dims[0], -1])
+            l = layer_norm(l, scope='ln')
+            l = tf.reshape(l, in_dims)
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=bn_phaze, scope='bn')
+
+        l = act_func(l)
         l = conv(l, scope='conv', filter_dims=filter_dims, stride_dims=stride_dims,
                  non_linear_fn=None, bias=use_bias, sn=sn)
 
@@ -439,8 +454,8 @@ def moments_for_layer_norm(x, axes=1, name=None):
     if not isinstance(axes, list):
         axes = [axes]
 
-    mean = tf.reduce_mean(x, axes, keep_dims=True)
-    variance = tf.sqrt(tf.reduce_mean(tf.square(x - mean), axes, keep_dims=True) + epsilon)
+    mean = tf.reduce_mean(x, axes, keepdims=True)
+    variance = tf.sqrt(tf.reduce_mean(tf.square(x - mean), axes, keepdims=True) + epsilon)
 
     return mean, variance
 

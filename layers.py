@@ -235,7 +235,7 @@ def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_
 
 
 def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=tf.nn.relu, scope='transition',
-                               norm='layer', bn_phaze=False, use_pool=True, use_bias=False, sn=False):
+                               norm='layer', b_train=False, use_pool=True, use_bias=False, sn=False):
     with tf.variable_scope(scope):
         l = layer
 
@@ -245,7 +245,7 @@ def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=
             l = layer_norm(l, scope='ln')
             l = tf.reshape(l, in_dims)
         elif norm == 'batch':
-            l = batch_norm_conv(l, b_train=bn_phaze, scope='bn')
+            l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
         l = act_func(l)
         l = conv(l, scope='conv', filter_dims=filter_dims, stride_dims=stride_dims,

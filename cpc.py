@@ -179,7 +179,7 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
                                        scope='layer' + str(i), dilation=dilation)
 
         l = layers.add_dense_transition_layer(l, filter_dims=[1, 1, num_channel_out], act_func=act_func,
-                                              scope='dense_transition_1', norm=norm, bn_phaze=b_train, use_pool=False)
+                                              scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
 
         pl = tf.constant(stochastic_survive)
 
@@ -232,14 +232,9 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
                                      act_func=act_func, norm=norm, b_train=b_train, scope='block_4',
                                      stochastic_depth=False, stochastic_survive=0.6)
 
-        #if norm == 'batch':
-        #     l = layers.batch_norm_conv(l, b_train=bn_phaze, scope='bn1')
-
-        l = act_func(l)
-
-        # 1/2
-        l = layers.conv(l, scope='conv2', filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
-                        non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
+                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
+                                              scope='tr1')
 
         l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_5',
@@ -257,14 +252,9 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_8',
                                     stochastic_depth=False, stochastic_survive=0.5)
 
-        #if norm == 'batch':
-        #    l = layers.batch_norm_conv(l, b_train=bn_phaze, scope='bn2')
-
-        l = act_func(l)
-
-        # 1/4
-        l = layers.conv(l, scope='conv3', filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
-                        non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
+                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
+                                              scope='tr2')
 
         l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,
                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_9',
@@ -315,14 +305,9 @@ def encoder(x, activation='relu', scope='encoder_network', norm='layer', b_train
                                      act_func=act_func, norm=norm, b_train=b_train, scope='block_4',
                                      stochastic_depth=False, stochastic_survive=0.6)
 
-        #if norm == 'batch':
-        #    l = layers.batch_norm_conv(l, b_train=bn_phaze, scope='bn1')
-
-        l = act_func(l)
-
-        # [12 x 12]
-        l = layers.conv(l, scope='conv2', filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
-                       non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
+                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
+                                              scope='tr1')
 
         print('layer2: ' + str(l.get_shape().as_list()))
         l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
@@ -341,14 +326,8 @@ def encoder(x, activation='relu', scope='encoder_network', norm='layer', b_train
                                      act_func=act_func, norm=norm, b_train=b_train, scope='block_8',
                                      stochastic_depth=False, stochastic_survive=0.6)
 
-        #if norm == 'batch':
-        #    l = layers.batch_norm_conv(l, b_train=bn_phaze, scope='bn2')
-
-        l = act_func(l)
-
-        # [6 x 6]
-        l = layers.conv(l, scope='conv5', filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
-                       non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
+                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False, scope='tr2')
 
         print('layer3: ' + str(l.get_shape().as_list()))
         l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,

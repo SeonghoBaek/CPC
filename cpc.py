@@ -157,6 +157,37 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
         return loss, logits
 
 
+def add_residual_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer',
+                       b_train=False, use_residual=True, scope='residual_block', use_dilation=False, sn=False):
+    with tf.variable_scope(scope):
+        l = in_layer
+        input_dims = in_layer.get_shape().as_list()
+        num_channel_in = input_dims[-1]
+        num_channel_out = input_dims[-1]
+
+        dilation = [1, 1, 1, 1]
+
+        if use_dilation == True:
+            dilation = [1, 2, 2, 1]
+
+        l = layers.conv(l, scope='bt_conv1', filter_dims=[1, 1, num_channel_out / 4], stride_dims=[1, 1],
+                    dilation=[1, 1, 1, 1],
+                    non_linear_fn=None, bias=False, sn=False)
+
+        for i in range(num_layers):
+            l = layers.add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], num_channel_out / 4], act_func=act_func, norm=norm, b_train=b_train,
+                                          scope='layer' + str(i), dilation=dilation, sn=sn)
+
+        l = layers.conv(l, scope='bt_conv2', filter_dims=[1, 1, num_channel_out], stride_dims=[1, 1],
+                        dilation=[1, 1, 1, 1],
+                        non_linear_fn=None, bias=False, sn=False)
+
+        if use_residual is True:
+            l = tf.add(l, in_layer)
+
+    return l
+
+
 def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer', b_train=False,
                              scope='residual_dense_block', use_dilation=False, stochastic_depth=False,
                              stochastic_survive=0.9):
@@ -171,7 +202,7 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
         if use_dilation == True:
             dilation = [1, 2, 2, 1]
 
-        layers.conv(l, scope='bt_conv', filter_dims=[1, 1, num_channel_out / 4], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
+        l = layers.conv(l, scope='bt_conv', filter_dims=[1, 1, num_channel_out / 4], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
                     non_linear_fn=None, bias=False, sn=False)
 
         for i in range(num_layers):

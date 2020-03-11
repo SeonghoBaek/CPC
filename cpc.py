@@ -450,7 +450,7 @@ def validate(model_path):
                 print(labelname + ', Prediction: ' + str(label_list[pred[0]]) + ', Confidence: ' + str(conf[0][pred[0]]))
 
 
-def fine_tune(model_path):
+def fine_tune(model_path, b_freeze=False):
     trX = []
     trY = []
 
@@ -515,11 +515,12 @@ def fine_tune(model_path):
     predict_op = tf.argmax(tf.nn.softmax(prediction), 1)
     confidence_op = tf.nn.softmax(prediction)
 
-    # Freeze Encoder & Transfer Mode
-    #class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss, var_list=task_vars)
-
-    # Fine tune mode
-    class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
+    if b_freeze is True:
+        # Freeze Encoder Weights & Transfer Mode
+        class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss, var_list=task_vars)
+    else:
+        # Fine tune mode
+        class_optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(class_loss)
 
     # Launch the graph in a session
     with tf.Session(config=config) as sess:
@@ -652,14 +653,11 @@ def pretrain(model_path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--mode', type=str, help='train/test/reps', default='train')
-    parser.add_argument('--model_path', type=str, help='model check point file path', default='./model/m.ckpt')
-    parser.add_argument('--data', type=str, help='data source base directory', default='./input')
-    parser.add_argument('--out', type=str, help='output directory', default='./out/embedding')
-    parser.add_argument('--train_data', type=str, help='training data directory', default='input')
-    parser.add_argument('--test_data', type=str, help='test data directory', default='./test_data')
-    parser.add_argument('--label', type=str, help='training data directory', default='input')
-    parser.add_argument('--align', type=bool, help='use face alignment', default=False)
+    parser.add_argument('--mode', type=str, help='train/fine_tune/validate', default='train')
+    parser.add_argument('--model_path', type=str, help='Model check point file path', default='./model/m.ckpt')
+    parser.add_argument('--train_data', type=str, help='Training data directory', default='input')
+    parser.add_argument('--test_data', type=str, help='Test data directory', default='./test_data')
+    parser.add_argument('--label', type=str, help='Label list directory. Used for identifying validate summary', default='input')
 
     args = parser.parse_args()
 
@@ -670,31 +668,49 @@ if __name__ == '__main__':
     label_directory = args.label
     test_data = args.test_data
 
+    # Input Data Dimension
     input_height = 96
     input_width = 96
     num_channel = 3
 
+    # Patch Dimension
     patch_height = 24
     patch_width = 24
 
-    patch_size = 24
-
+    # Dense Conv Block Base Channel Depth
     dense_block_depth = 128
+
+    # Bottle neck(depth narrow down) depth. See Residual Dense Block and Residual Block.
     bottleneck_depth = 64
+
+    # CPC Encoding latent dimension
     representation_dim = 1024
+
+    # Number of patches in horizontal / vertical
     num_context_patches = 7
 
+    # Input data augmentation Setting. See function: load_images_from_folder.
     scale_size = 110
     num_aug_patch = 4
+
+    # Training parameter
     num_epoch = 10
     batch_size = 8
+
+    # Mini batch
+    # Each input in batch_size batches is devided to num_context_patches * num_context_patches patches.
+    # ex) batch_size = 8, num_context_patches = 7
+    #     Each input in batch are devided 7 * 7 patches.
+    #     Total input data in 1 batch is (8 * 7 * 7) items.
     mini_batch_size = num_context_patches * num_context_patches
 
     if mode == 'train':
+        # Train unsupervised CPC encoder.
         num_class_per_group = len(os.listdir(imgs_dirname))
         num_epoch = 50
         pretrain(model_path)
     elif mode == 'fine_tune':
+        # Fine tune with specific downstream task.
         num_class_per_group = len(os.listdir(imgs_dirname))
         num_epoch = 20
         fine_tune(model_path)

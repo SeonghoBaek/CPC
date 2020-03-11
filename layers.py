@@ -199,10 +199,7 @@ def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer'
         l = layer
 
         if norm == 'layer':
-            in_dims = layer.get_shape().as_list()
-            l = tf.reshape(l, [in_dims[0], -1])
             l = layer_norm(l, scope='ln')
-            l = tf.reshape(l, in_dims)
         elif norm == 'batch':
             l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
@@ -220,10 +217,7 @@ def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_
         l = layer
 
         if norm == 'layer':
-            in_dims = layer.get_shape().as_list()
-            l = tf.reshape(l, [in_dims[0], -1])
             l = layer_norm(l, scope='ln')
-            l = tf.reshape(l, in_dims)
         elif norm == 'batch':
             l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
@@ -240,10 +234,7 @@ def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=
         l = layer
 
         if norm == 'layer':
-            in_dims = layer.get_shape().as_list()
-            l = tf.reshape(l, [in_dims[0], -1])
             l = layer_norm(l, scope='ln')
-            l = tf.reshape(l, in_dims)
         elif norm == 'batch':
             l = batch_norm_conv(l, b_train=b_train, scope='bn')
 
@@ -357,10 +348,11 @@ def deconv(input_data, b_size, scope, filter_dims, stride_dims, padding='SAME', 
 
         map = tf.nn.bias_add(map, deconv_bias)
 
-        activation = non_linear_fn(map)
+        if non_linear_fn is not None:
+            map = non_linear_fn(map)
 
         # print(scope, 'out', activation.get_shape().as_list())
-        return activation
+        return map
 
 
 def self_attention(x, channels, act_func=tf.nn.relu, scope='attention'):
@@ -464,6 +456,11 @@ def layer_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
     # derived from:
     # https://github.com/LeavesBreathe/tensorflow_with_latest_papers, but simplified.
     with tf.variable_scope(scope):
+        input_dims = x.get_shape().as_list()
+
+        if len(input_dims) != 2:
+            x = tf.reshape(x, [input_dims[0], -1])
+
         num_units = x.get_shape().as_list()[1]
 
         alpha = tf.get_variable('alpha', [num_units],
@@ -473,5 +470,9 @@ def layer_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
 
         mean, variance = moments_for_layer_norm(x)
         y = (alpha * (x - mean)) / (variance) + bias
+
+        if len(input_dims) != 2:
+           y = tf.reshape(y, input_dims)
+
     return y
 

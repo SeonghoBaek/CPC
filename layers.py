@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.python.client import device_lib
 import numpy as np
 import util
 import argparse

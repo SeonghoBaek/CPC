@@ -1,5 +1,5 @@
 # Tensorflow Implementation of CPC v2: Data Efficient Image Recognition with CPC
-# Author: Seongho Baek @seongho.baek@sk.com
+# Author: Seongho Baek, seonghobaek@gmail.com
 
 
 import tensorflow as tf

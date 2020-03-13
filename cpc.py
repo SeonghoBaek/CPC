@@ -1,3 +1,7 @@
+# Tensorflow Implementation of CPC v2: Data Efficient Image Recognition with CPC
+# Author: Seongho Baek @seongho.baek@sk.com
+
+
 import tensorflow as tf
 import layers
 from sklearn.utils import shuffle
@@ -257,52 +261,24 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
         l = layers.conv(l, scope='conv1', filter_dims=[3, 3, dense_block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_1',
-                                    stochastic_depth=False, stochastic_survive=0.7)
+        block_depth = dense_block_depth
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_2',
-                                    stochastic_depth=False, stochastic_survive=0.65)
+        for i in range(5):
+            l = add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                         act_func=act_func, norm=norm, b_train=b_train, scope='dense_' + str(i))
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_3',
-                                    stochastic_depth=False, stochastic_survive=0.6)
+        for i in range(30):
+            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                   norm=norm, b_train=b_train, scope='block1_' + str(i))
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_4',
-                                     stochastic_depth=False, stochastic_survive=0.6)
+        block_depth = block_depth * 2
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr1')
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2], act_func=act_func,
+                                              scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_5',
-                                    stochastic_depth=False, stochastic_survive=0.6)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_6',
-                                    stochastic_depth=False, stochastic_survive=0.6)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_7',
-                                    stochastic_depth=False, stochastic_survive=0.6)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_8',
-                                    stochastic_depth=False, stochastic_survive=0.5)
-
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr2')
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_9',
-                                    stochastic_depth=True, stochastic_survive=0.5)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_10')
+        for i in range(20):
+            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                   norm=norm, b_train=b_train, scope='block2_' + str(i))
 
         l = act_func(l)
 
@@ -324,60 +300,36 @@ def encoder(x, activation='relu', scope='encoder_network', norm='layer', b_train
             act_func = tf.nn.sigmoid
 
         # [24 x 24]
-        print('layer1: ' + str(x.get_shape().as_list()))
-        l = layers.conv(x, scope='conv1', filter_dims=[3, 3, dense_block_depth], stride_dims=[1, 1],
+        block_depth = dense_block_depth
+
+        l = layers.conv(x, scope='conv1', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                        non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
 
-        l = layers.self_attention(l, dense_block_depth)
+        l = layers.self_attention(l, block_depth)
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_1',
-                                    stochastic_depth=False, stochastic_survive=0.7)
+        for i in range(5):
+            l = add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                         act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_' + str(i))
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm,  b_train=b_train, scope='block_2',
-                                    stochastic_depth=False, stochastic_survive=0.65)
+        block_depth = block_depth * 2
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_3',
-                                    stochastic_depth=False, stochastic_survive=0.6)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth], num_layers=2,
-                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_4',
-                                     stochastic_depth=False, stochastic_survive=0.6)
-
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 2], stride_dims=[2, 2],
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
                                               act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
                                               scope='tr1')
 
-        print('layer2: ' + str(l.get_shape().as_list()))
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_5',
-                                    stochastic_depth=False, stochastic_survive=0.6)
+        for i in range(20):
+            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                   norm=norm, b_train=b_train, scope='res_block_1_' + str(i))
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_6',
-                                    stochastic_depth=False, stochastic_survive=0.6)
+        block_depth = block_depth * 2
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_7',
-                                    stochastic_depth=False, stochastic_survive=0.6)
+        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
+                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
+                                              scope='tr2')
 
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 2], num_layers=2,
-                                     act_func=act_func, norm=norm, b_train=b_train, scope='block_8',
-                                     stochastic_depth=False, stochastic_survive=0.6)
-
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, dense_block_depth * 4], stride_dims=[2, 2],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False, scope='tr2')
-
-        print('layer3: ' + str(l.get_shape().as_list()))
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_9',
-                                    stochastic_depth=False, stochastic_survive=0.5)
-
-        l = add_residual_dense_block(l, filter_dims=[3, 3, dense_block_depth * 4], num_layers=2,
-                                    act_func=act_func, norm=norm, b_train=b_train, scope='block_10',
-                                    stochastic_depth=False, stochastic_survive=0.5)
+        for i in range(30):
+            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                   norm=norm, b_train=b_train, scope='res_block_2_' + str(i))
 
         last_dense_layer = l
         last_dense_layer = act_func(last_dense_layer)
@@ -508,7 +460,7 @@ def fine_tune(model_path, b_freeze=False):
     latent = tf.reshape(latent, [batch_size, num_context_patches, num_context_patches, -1])
     print('Latent Dims: ' + str(latent.get_shape().as_list()))
 
-    latent = task(latent, output_dim=512, activation='relu', norm='layer', b_train=b_train, scope='task')
+    latent = task(latent, output_dim=512, activation='relu', norm='batch', b_train=b_train, scope='task')
     print('Task Latent Dims: ' + str(latent.get_shape().as_list()))
 
     prediction = layers.fc(latent, num_class_per_group, non_linear_fn=None, scope='fc_final')
@@ -723,7 +675,8 @@ if __name__ == '__main__':
         # Fine tune with specific downstream task.
         num_class_per_group = len(os.listdir(imgs_dirname))
         num_epoch = 20
-        fine_tune(model_path)
+        batch_size = 32
+        fine_tune(model_path, b_freeze=True)
     elif mode == 'validate':
         num_class_per_group = len(os.listdir(label_directory))
         batch_size = 1

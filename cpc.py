@@ -131,7 +131,7 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
 
             logits = tf.matmul(preds_i, targets, transpose_b=True)
 
-            print('logits: ' + str(logits.get_shape().as_list()))
+            print(str(i) + ', logits: ' + str(logits.get_shape().as_list()))
 
             b = [x // (col_dim_i * row_dim) for x in range(total_elements)]
             #print(b)
@@ -142,7 +142,7 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
 
             labels = b * col_dim * row_dim + (i + 1) * row_dim + col
 
-            print('Labels: ', labels)
+            print(str(i) + ', Labels: ', labels)
 
             onehot_labels = []
 
@@ -558,13 +558,7 @@ def pretrain(model_path):
     context = encoder(X, activation='relu', norm='layer', b_train=b_train, scope='encoder')
     print('Encoder Dims: ' + str(context.get_shape().as_list()))
 
-    #context = layers.global_avg_pool(context, output_length=representation_dim, use_bias=True, scope='gp')
-    #print('GP Dims: ' + str(context.get_shape().as_list()))
-
-    #context = tf.reshape(context, [batch_size, num_context_patches, num_context_patches, -1])
-    #print('Context Dims: ' + str(context.get_shape().as_list()))
-
-    cpc_loss, cpc_logits = CPC(context, scope='cpc')
+    cpc_loss, cpc_logits = CPC(context, emb_scale=0.1, steps_to_ignore=0, steps_to_predict=2, scope='cpc')
 
     optimizer = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5).minimize(cpc_loss)
 
@@ -675,7 +669,7 @@ if __name__ == '__main__':
     if mode == 'train':
         # Train unsupervised CPC encoder.
         num_class_per_group = len(os.listdir(imgs_dirname))
-        num_epoch = 50
+        num_epoch = 20
         pretrain(model_path)
     elif mode == 'fine_tune':
         # Fine tune with specific downstream task.

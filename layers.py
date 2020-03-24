@@ -1,68 +1,46 @@
 import tensorflow as tf
-import numpy as np
-import util
-import argparse
-import os
-import csv
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-input_feature_dim = 97
-cond_step_dim = 8
-cond_wafer_dim = 24
-cond_dim = cond_step_dim + cond_wafer_dim
-
-lstm_sequence_length = 20
-lstm_hidden_size_layer1 = 64
-lstm_hidden_size_layer2 = 64
-lstm_feature_dim = lstm_hidden_size_layer1
-lstm_z_sequence_dim = 16
-lstm_linear_transform_input_dim = 2 * lstm_feature_dim
-
-g_encoder_z_local_dim = 16
-g_encoder_z_dim = lstm_z_sequence_dim + g_encoder_z_local_dim + cond_dim
-g_encoder_input_dim = input_feature_dim
-g_encoder_layer1_dim = 84
-g_encoder_layer2_dim = 64
-g_encoder_layer3_dim = 32
-
-g_decoder_output_dim = input_feature_dim
-g_decoder_layer2_dim = 72
-g_decoder_layer1_dim = 84
-
-d_layer_1_dim = input_feature_dim
-d_layer_2_dim = 64
-d_layer_3_dim = 32
-d_layer_4_dim = 16
-
-num_block_layers = 3
-dense_layer_depth = 16
 
 
-def lstm_network(input, scope='lstm_network'):
+def lstm_network(input, lstm_hidden_size_layer=64,
+                 lstm_latent_dim=16, lstm_num_layers=2, forget_bias=1.0, scope='lstm_network'):
     with tf.variable_scope(scope):
         # tf.nn.rnn_cell
-        lstm_cell1 = tf.contrib.rnn.BasicLSTMCell(lstm_hidden_size_layer1, forget_bias=1.0)
-        lstm_cell2 = tf.contrib.rnn.BasicLSTMCell(lstm_hidden_size_layer2, forget_bias=1.0)
+        def make_cell():
+            cell = tf.nn.rnn_cell.LSTMCell(lstm_hidden_size_layer, forget_bias=forget_bias)
+            return cell
 
-        lstm_cells = tf.contrib.rnn.MultiRNNCell(cells=[lstm_cell1, lstm_cell2], state_is_tuple=True)
-
-        # tf.nn.rnn_cell
-        # lstm_cell1 = tf.nn.rnn_cell.LSTMCell(lstm_hidden_size_layer1, forget_bias=1.0)
-        # lstm_cell2 = tf.nn.rnn_cell.LSTMCell(lstm_hidden_size_layer2, forget_bias=1.0)
-
-        #lstm_cells = tf.nn.rnn_cell.MultiRNNCell(cells=[lstm_cell1, lstm_cell2], state_is_tuple=True)
+        lstm_cells = tf.nn.rnn_cell.MultiRNNCell([make_cell() for _ in range(lstm_num_layers)])
 
         # initial_state = lstm_cells.zero_state(batch_size,  tf.float32)
 
         _, states = tf.nn.dynamic_rnn(lstm_cells, input, dtype=tf.float32, initial_state=None)
-
-        # z_sequence_output = states[1].h
         # print(z_sequence_output.get_shape())
-        states_concat = tf.concat([states[0].h, states[1].h], 1)
 
-        #def fc(input, scope, out_dim, non_linear_fn=None, initial_value=None, use_bias=True):
-        z_sequence_output = fc(states_concat, lstm_z_sequence_dim, scope='linear_transform')
+        states_concat = tf.concat([states[0].h, states[1].h], 1)
+        z_sequence_output = fc(states_concat, lstm_latent_dim, scope='linear_transform')
+        #z_sequence_output = states[1].h
+
+    return z_sequence_output
+
+
+def bi_lstm_network(input, forget_bias=1.0, lstm_hidden_size_layer=64, lstm_latent_dim=16, lstm_num_layers=2, scope='bi_lstm_network'):
+    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        # Forward and backword cells
+        def make_cell():
+            cell = tf.nn.rnn_cell.LSTMCell(lstm_hidden_size_layer, forget_bias=forget_bias)
+            return cell
+
+        fw_cell = tf.nn.rnn_cell.MultiRNNCell([make_cell() for _ in range(lstm_num_layers)])
+        bw_cell = tf.nn.rnn_cell.MultiRNNCell([make_cell() for _ in range(lstm_num_layers)])
+
+        _, states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, input, dtype=tf.float32)
+
+        states_fw, states_bw = states
+        state_concat = tf.concat([states_fw[1].h, states_bw[1].h], 1)
+
+        # Linear Transform
+        z_sequence_output = fc(state_concat, lstm_latent_dim, use_bias=False, scope='linear_transform')
+        #z_sequence_output = states_fw[1].h
 
     return z_sequence_output
 

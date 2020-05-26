@@ -13,11 +13,23 @@ def lstm_network(input, lstm_hidden_size_layer=64,
 
         # initial_state = lstm_cells.zero_state(batch_size,  tf.float32)
 
-        _, states = tf.nn.dynamic_rnn(lstm_cells, input, dtype=tf.float32, initial_state=None)
+        outputs, states = tf.nn.dynamic_rnn(lstm_cells, input, dtype=tf.float32, initial_state=None)
         # print(z_sequence_output.get_shape())
 
-        states_concat = tf.concat([states[0].h, states[1].h], 1)
-        z_sequence_output = fc(states_concat, lstm_latent_dim, scope='linear_transform')
+        outputs = tf.transpose(outputs, [1, 0, 2])
+        outputs = outputs[-1]
+        print('LSTM output shape: ' + str(outputs.get_shape().as_list()))
+
+        #outputs = tf.slice(outputs, [0, outputs.get_shape().as_list()[1]-1, 0], [-1, 1, -1])
+        #outputs = tf.squeeze(outputs)
+        #print('LSTM output shape: ' + str(outputs.get_shape().as_list()))
+
+        z_sequence_output = outputs
+
+        #states_concat = tf.concat([states[0].h, states[1].h], 1)
+        #z_sequence_output = fc(states_concat, lstm_latent_dim, scope='linear_transform')
+        # print('LSTM state shape: ' + str(states))
+
         #z_sequence_output = states[1].h
 
     return z_sequence_output
@@ -33,13 +45,19 @@ def bi_lstm_network(input, forget_bias=1.0, lstm_hidden_size_layer=64, lstm_late
         fw_cell = tf.nn.rnn_cell.MultiRNNCell([make_cell() for _ in range(lstm_num_layers)])
         bw_cell = tf.nn.rnn_cell.MultiRNNCell([make_cell() for _ in range(lstm_num_layers)])
 
-        _, states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, input, dtype=tf.float32)
+        outputs, states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, input, dtype=tf.float32)
 
-        states_fw, states_bw = states
-        state_concat = tf.concat([states_fw[1].h, states_bw[1].h], 1)
+        fw_output = tf.transpose(outputs[0], [1, 0, 2])
+        bw_output = tf.transpose(outputs[1], [1, 0, 2])
+        outputs = tf.concat([fw_output[-1], bw_output[-1]], -1)
+        print('LSTM output shape: ' + str(outputs.get_shape().as_list()))
+        z_sequence_output = fc(outputs, lstm_latent_dim, use_bias=True, scope='linear_transform')
+
+        #states_fw, states_bw = states
+        #state_concat = tf.concat([states_fw[1].h, states_bw[1].h], 1)
 
         # Linear Transform
-        z_sequence_output = fc(state_concat, lstm_latent_dim, use_bias=False, scope='linear_transform')
+        #z_sequence_output = fc(state_concat, lstm_latent_dim, use_bias=True, scope='linear_transform')
         #z_sequence_output = states_fw[1].h
 
     return z_sequence_output
@@ -338,43 +356,33 @@ def self_attention(x, channels, act_func=tf.nn.relu, scope='attention'):
 
         f = conv(x, scope='f_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
         f = tf.layers.max_pooling2d(f, pool_size=2, strides=2, padding='SAME')
-
-        print('attention f dims: ' + str(f.get_shape().as_list()))
+        #print('attention f dims: ' + str(f.get_shape().as_list()))
 
         g = conv(x, scope='g_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
-
-        print('attention g dims: ' + str(g.get_shape().as_list()))
+        #print('attention g dims: ' + str(g.get_shape().as_list()))
 
         h = conv(x, scope='h_conv', filter_dims=[1, 1, channels // 2], stride_dims=[1, 1], non_linear_fn=act_func)
         h = tf.layers.max_pooling2d(h, pool_size=2, strides=2, padding='SAME')
-
-        print('attention h dims: ' + str(h.get_shape().as_list()))
+        #print('attention h dims: ' + str(h.get_shape().as_list()))
 
         # N = h * w
         g = tf.reshape(g, shape=[-1, g.shape[1] * g.shape[2], g.get_shape().as_list()[-1]])
-
-        print('attention g flat dims: ' + str(g.get_shape().as_list()))
+        #print('attention g flat dims: ' + str(g.get_shape().as_list()))
 
         f = tf.reshape(f, shape=[-1, f.shape[1] * f.shape[2], f.shape[-1]])
-
-        print('attention f flat dims: ' + str(f.get_shape().as_list()))
+        #print('attention f flat dims: ' + str(f.get_shape().as_list()))
 
         s = tf.matmul(g, f, transpose_b=True)  # # [bs, N, N]
-
         beta = tf.nn.softmax(s)  # attention map
-
-        print('attention beta dims: ' + str(s.get_shape().as_list()))
+        #print('attention beta dims: ' + str(s.get_shape().as_list()))
 
         h = tf.reshape(h, shape=[-1, h.shape[1] * h.shape[2], h.shape[-1]])
-
-        print('attention h flat dims: ' + str(h.get_shape().as_list()))
+        #print('attention h flat dims: ' + str(h.get_shape().as_list()))
 
         o = tf.matmul(beta, h)  # [bs, N, C]
-
-        print('attention o dims: ' + str(o.get_shape().as_list()))
+        #print('attention o dims: ' + str(o.get_shape().as_list()))
 
         gamma = tf.get_variable("gamma", [1], initializer=tf.constant_initializer(0.0))
-
         o = tf.reshape(o, shape=[-1, height, width, num_channels // 2])  # [bs, h, w, C]
         o = conv(o, scope='attn_conv', filter_dims=[1, 1, channels], stride_dims=[1, 1], non_linear_fn=act_func)
         x = gamma * o + x
@@ -453,3 +461,120 @@ def layer_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
 
     return y
 
+
+def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer', b_train=False,
+                             scope='residual_dense_block', use_dilation=False, stochastic_depth=False,
+                             stochastic_survive=0.9):
+    with tf.variable_scope(scope):
+        l = in_layer
+        input_dims = in_layer.get_shape().as_list()
+        num_channel_in = input_dims[-1]
+        num_channel_out = filter_dims[-1]
+
+        dilation = [1, 1, 1, 1]
+
+        if use_dilation == True:
+            dilation = [1, 2, 2, 1]
+
+        bn_depth = num_channel_in // (num_layers * 2)
+        #bn_depth = bottleneck_depth
+
+        l = conv(l, scope='bt_conv', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
+                    non_linear_fn=None, bias=False, sn=False)
+
+        for i in range(num_layers):
+            l = add_dense_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
+                                       scope='layer' + str(i), dilation=dilation)
+
+        l = add_dense_transition_layer(l, filter_dims=[1, 1, num_channel_in], act_func=act_func,
+                                              scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
+
+        if norm == 'layer':
+            l = layer_norm(l, scope='ln2')
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=b_train, scope='bn2')
+
+        pl = tf.constant(stochastic_survive)
+
+        def train_mode():
+            survive = tf.less(pl, tf.random_uniform(shape=[], minval=0.0, maxval=1.0))
+            return tf.cond(survive, lambda: tf.add(l, in_layer), lambda: in_layer)
+
+        def test_mode():
+            return tf.add(tf.multiply(pl, l), in_layer)
+
+        if stochastic_depth == True:
+            return tf.cond(b_train, train_mode, test_mode)
+
+        l = tf.add(l, in_layer)
+        l = act_func(l)
+
+        return l
+
+
+def add_residual_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer',
+                       b_train=False, use_residual=True, scope='residual_block', use_dilation=False,
+                       sn=False):
+    with tf.variable_scope(scope):
+        l = in_layer
+        input_dims = in_layer.get_shape().as_list()
+        num_channel_in = input_dims[-1]
+        num_channel_out = filter_dims[-1]
+
+        dilation = [1, 1, 1, 1]
+
+        if use_dilation == True:
+            dilation = [1, 2, 2, 1]
+
+        bn_depth = num_channel_in
+        '''
+            1x1 conv
+            ----------
+            BN
+            activation
+            3x3 conv
+            ----------
+            BN
+            activation
+            3x3 conv
+            ----------
+            BN
+            activation
+            1x1 conv
+            BN
+            ----------
+            Add
+            activation
+        '''
+        # Bottle Neck Layer
+        bn_depth = num_channel_in // (num_layers * 2)
+        #bn_depth = bottleneck_depth
+
+        l = conv(l, scope='bt_conv1', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1],
+                        dilation=[1, 1, 1, 1],
+                        non_linear_fn=None, bias=False, sn=False)
+
+        for i in range(num_layers):
+            l = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
+                                          scope='layer' + str(i), dilation=dilation, sn=sn)
+
+        if norm == 'layer':
+            l = layer_norm(l, scope='bt_ln2')
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=b_train, scope='bt_bn2')
+
+        l = act_func(l)
+
+        l = conv(l, scope='bt_conv2', filter_dims=[1, 1, num_channel_in], stride_dims=[1, 1],
+                        dilation=[1, 1, 1, 1],
+                        non_linear_fn=None, bias=False, sn=False)
+        if norm == 'layer':
+            l = layer_norm(l, scope='bt_ln3')
+        elif norm == 'batch':
+            l = batch_norm_conv(l, b_train=b_train, scope='bt_bn3')
+
+        if use_residual is True:
+            l = tf.add(l, in_layer)
+            l = act_func(l)
+
+    return l

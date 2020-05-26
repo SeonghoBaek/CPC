@@ -1,5 +1,6 @@
 # Tensorflow Implementation of CPC v2: Data Efficient Image Recognition with CPC
-# Author: Seongho Baek seonghobaek@gmail.com
+# Author: Seongho Baek 
+# seonghobaek@gmail.com
 
 
 import tensorflow as tf
@@ -28,6 +29,63 @@ def prepare_patches(image, patch_size=[24, 24], patch_dim=[7, 7], stride=12):
 
     #print('Num patches: ', len(patches))
     return np.array(patches)
+
+
+def prepare_patches_from_file(file_name, patch_size=[24, 24], patch_dim=[7, 7], stride=12):
+    imgs = load_images(file_name, use_augmentation=True)
+    patches = np.empty([0, patch_height, patch_width, num_channel])
+
+    for img in imgs:
+        p = prepare_patches(img, patch_size=[patch_height, patch_width],
+                            patch_dim=[num_context_patches, num_context_patches], stride=patch_height // 2)
+        patches = np.concatenate((patches, p), axis=0)
+
+    return patches
+
+
+def load_images(file_name, use_augmentation=False, add_noise=False):
+    images = []
+    jpg_img = cv2.imread(file_name)
+    img = cv2.cvtColor(jpg_img, cv2.COLOR_BGR2RGB)  # To RGB format
+    img = cv2.resize(img, dsize=(input_height, input_width))
+
+    if img is not None:
+        img = np.array(img)
+
+        n_img = img / 255.0
+        images.append(n_img)
+
+        n_img = cv2.flip(img, 1)
+        n_img = n_img / 255.0
+        images.append(n_img)
+
+        if use_augmentation is True:
+            img = cv2.resize(img, dsize=(scale_size, scale_size), interpolation=cv2.INTER_CUBIC)
+
+            dy = np.random.random_integers(low=1, high=img.shape[0] - input_height, size=num_aug_patch - 1)
+            dx = np.random.random_integers(low=1, high=img.shape[1] - input_width, size=num_aug_patch - 1)
+
+            window = list(zip(dy, dx))
+
+            for i in range(len(window)):
+                croped = img[window[i][0]:window[i][0] + input_height,
+                         window[i][1]:window[i][1] + input_width].copy()
+                # cv2.imwrite(filename + '_crop_' + str(i) + '.jpg', croped)
+                n_croped = croped / 255.0
+                images.append(n_croped)
+
+                croped = cv2.flip(croped, 1)
+
+                if add_noise is True:
+                    croped = croped + np.random.normal(size=(input_height, input_width, num_channel))
+
+                    croped[croped > 255.0] = 255.0
+                    croped[croped < 0] = 0.0
+
+                croped = croped / 255.0
+                images.append(croped)
+
+    return np.array(images)
 
 
 def load_images_from_folder(folder, use_augmentation=False, add_noise=False):
@@ -112,8 +170,17 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
         context = pixelCNN(latents)
         print('PixelCNN Context Shape: ' + str(context.get_shape().as_list()))
 
-        targets = layers.conv(latents, scope='conv1', filter_dims=[1, 1, target_dim], stride_dims=[1, 1],
-                              non_linear_fn=None, bias=True)
+        def context_transform(input_layer, scope='context_transform'):
+            l = layers.conv(input_layer, scope=scope + '_1', filter_dims=[1, 1, target_dim], stride_dims=[1, 1],
+                        non_linear_fn=tf.nn.relu, bias=True)
+
+            l = layers.conv(l, scope=scope + '_2', filter_dims=[1, 1, target_dim], stride_dims=[1, 1],
+                            non_linear_fn=None, bias=True)
+
+            return l
+
+        targets = context_transform(latents, 'transform')
+
         batch_dim, col_dim, row_dim = targets.get_shape().as_list()[:-1]
         #print(batch_dim, col_dim, row_dim)
         targets = tf.reshape(targets, [-1, target_dim])
@@ -121,9 +188,7 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
         for i in range(steps_to_ignore, steps_to_predict):
             col_dim_i = col_dim - i - 1
             total_elements = batch_dim * col_dim_i * row_dim
-            preds_i = layers.conv(context, scope='conv2', filter_dims=[1, 1, target_dim], stride_dims=[1, 1],
-                                  non_linear_fn=None, bias=True)
-
+            preds_i = context_transform(latents, 'transform')
             preds_i = tf.slice(preds_i, [0, 0, 0, 0], [-1, col_dim_i, -1, -1])
             preds_i = preds_i * emb_scale
             # preds_i = preds_i[:, :-(i + 1), :, :] * emb_scale
@@ -160,87 +225,6 @@ def CPC(latents, target_dim=64, emb_scale=0.1, steps_to_ignore=2, steps_to_predi
         return loss, logits
 
 
-def add_residual_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer',
-                       b_train=False, use_residual=True, scope='residual_block', use_dilation=False,
-                       sn=False, use_bottleneck=False):
-    with tf.variable_scope(scope):
-        l = in_layer
-        input_dims = in_layer.get_shape().as_list()
-        num_channel_in = input_dims[-1]
-        num_channel_out = filter_dims[-1]
-
-        dilation = [1, 1, 1, 1]
-
-        if use_dilation == True:
-            dilation = [1, 2, 2, 1]
-
-        bn_depth = num_channel_in
-
-        if use_bottleneck is True:
-            bn_depth = num_channel_in // (num_layers * 2)
-            #bn_depth = bottleneck_depth
-
-            l = layers.conv(l, scope='bt_conv1', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1],
-                            dilation=[1, 1, 1, 1],
-                            non_linear_fn=None, bias=False, sn=False)
-
-        for i in range(num_layers):
-            l = layers.add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
-                                          scope='layer' + str(i), dilation=dilation, sn=sn)
-
-        if use_bottleneck is True:
-            l = layers.conv(l, scope='bt_conv2', filter_dims=[1, 1, num_channel_in], stride_dims=[1, 1],
-                            dilation=[1, 1, 1, 1],
-                            non_linear_fn=None, bias=False, sn=False)
-
-        if use_residual is True:
-            l = tf.add(l, in_layer)
-
-    return l
-
-
-def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.relu, norm='layer', b_train=False,
-                             scope='residual_dense_block', use_dilation=False, stochastic_depth=False,
-                             stochastic_survive=0.9):
-    with tf.variable_scope(scope):
-        l = in_layer
-        input_dims = in_layer.get_shape().as_list()
-        num_channel_in = input_dims[-1]
-        num_channel_out = filter_dims[-1]
-
-        dilation = [1, 1, 1, 1]
-
-        if use_dilation == True:
-            dilation = [1, 2, 2, 1]
-
-        bn_depth = num_channel_in // (num_layers * 2)
-        #bn_depth = bottleneck_depth
-
-        l = layers.conv(l, scope='bt_conv', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
-                    non_linear_fn=None, bias=False, sn=False)
-
-        for i in range(num_layers):
-            l = layers.add_dense_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
-                                       scope='layer' + str(i), dilation=dilation)
-
-        l = layers.add_dense_transition_layer(l, filter_dims=[1, 1, num_channel_in], act_func=act_func,
-                                              scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
-
-        pl = tf.constant(stochastic_survive)
-
-        def train_mode():
-            survive = tf.less(pl, tf.random_uniform(shape=[], minval=0.0, maxval=1.0))
-            return tf.cond(survive, lambda: tf.add(l, in_layer), lambda: in_layer)
-
-        def test_mode():
-            return tf.add(tf.multiply(pl, l), in_layer)
-
-        if stochastic_depth == True:
-            return tf.cond(b_train, train_mode, test_mode)
-
-    return tf.add(l, in_layer)
-
-
 def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer', b_train=False):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         if activation == 'swish':
@@ -256,33 +240,39 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
 
         l = x
 
-        l = layers.conv(l, scope='conv1', filter_dims=[3, 3, dense_block_depth], stride_dims=[1, 1],
+        l = layers.conv(l, scope='conv1', filter_dims=[5, 5, dense_block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
+
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln1')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn1')
+
+        l = act_func(l)
 
         block_depth = dense_block_depth
 
-        #for i in range(5):
-        #    l = add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
-        #                                 act_func=act_func, norm=norm, b_train=b_train, scope='dense_' + str(i))
-
         for i in range(15):
-            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+            l = layers.add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                    norm=norm, b_train=b_train, scope='block1_' + str(i))
 
         block_depth = block_depth * 2
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2], act_func=act_func,
+        l = layers.conv(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2], act_func=act_func,
                                               scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
 
-        for i in range(10):
-            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                   norm=norm, b_train=b_train, scope='block2_' + str(i))
+        l = layers.conv(l, scope='conv2', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[1, 1, output_dim], stride_dims=[1, 1],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr3')
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln2')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn2')
 
         l = act_func(l)
+
+        for i in range(10):
+            l = layers.add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                   norm=norm, b_train=b_train, scope='block2_' + str(i), use_dilation=True)
 
         latent = layers.global_avg_pool(l, output_length=output_dim)
 
@@ -301,45 +291,115 @@ def encoder(x, activation='relu', scope='encoder_network', norm='layer', b_train
         else:
             act_func = tf.nn.sigmoid
 
-        # [24 x 24]
-        block_depth = dense_block_depth
+        # [192 x 192]
+        block_depth = dense_block_depth // 4
 
-        l = layers.conv(x, scope='conv1', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
+        l = layers.conv(x, scope='conv1', filter_dims=[5, 5, block_depth], stride_dims=[1, 1],
                        non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
 
-        l = layers.self_attention(l, block_depth)
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln0')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn0')
 
-        for i in range(3):
-            l = add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
-                                         act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_1_' + str(i))
+        l = act_func(l)
 
+        for i in range(4):
+            l = layers.add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                                act_func=act_func, norm=norm, b_train=b_train,
+                                                scope='dense_block_1_' + str(i))
+
+        # [64 x 64]
         block_depth = block_depth * 2
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr1')
+        l = layers.conv(l, scope='tr1', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
 
-        for i in range(10):
-            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                   norm=norm, b_train=b_train, scope='res_block_1_' + str(i), use_bottleneck=True)
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln1')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn1')
 
+        l = act_func(l)
+
+        print('Encoder Block 1: ' + str(l.get_shape().as_list()))
+
+        for i in range(2):
+            l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                          norm=norm, b_train=b_train, scope='res_block_1_' + str(i))
+
+        # [32 x 32]
         block_depth = block_depth * 2
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr2')
-        for i in range(15):
-            l = add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                   norm=norm, b_train=b_train, scope='res_block_2_' + str(i), use_bottleneck=True)
+        l = layers.conv(l, scope='tr2', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
 
-        l = layers.add_dense_transition_layer(l, filter_dims=[1, 1, representation_dim], stride_dims=[1, 1],
-                                              act_func=act_func, norm=norm, b_train=b_train, use_pool=False,
-                                              scope='tr3')
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln2')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn2')
 
-        last_dense_layer = act_func(l)
+        l = act_func(l)
 
-        context = layers.global_avg_pool(last_dense_layer, output_length=representation_dim, use_bias=True, scope='gp')
-        print('GP Dims: ' + str(context.get_shape().as_list()))
+        print('Encoder Block 2: ' + str(l.get_shape().as_list()))
+
+        for i in range(2):
+            l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                          norm=norm, b_train=b_train, scope='res_block_2_' + str(i))
+
+        # [16 x 16]
+        block_depth = block_depth * 2
+
+        l = layers.conv(l, scope='tr3', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
+
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln3')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn3')
+
+        l = act_func(l)
+
+        print('Encoder Block 3: ' + str(l.get_shape().as_list()))
+
+        for i in range(2):
+            l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                          norm=norm, b_train=b_train, scope='res_block_3' + str(i))
+
+        # [8 x 8]
+        block_depth = block_depth * 2
+        l = layers.conv(l, scope='tr4', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
+
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln4')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn4')
+
+        l = act_func(l)
+
+        print('Encoder Block 4: ' + str(l.get_shape().as_list()))
+
+        for i in range(2):
+            l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                          norm=norm, b_train=b_train, use_dilation=True, scope='res_block_4_' + str(i))
+
+        # [4 x 4]
+        block_depth = block_depth * 2
+        l = layers.conv(l, scope='tr5', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
+        print('Encoder Block 5: ' + str(l.get_shape().as_list()))
+
+        if norm == 'layer':
+            l = layers.layer_norm(l, scope='ln5')
+        elif norm == 'batch':
+            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn5')
+
+        l = act_func(l)
+
+        for i in range(2):
+            l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                          norm=norm, b_train=b_train, use_dilation=True, scope='res_block_5_' + str(i))
+
+        last_layer = l
+
+        context = layers.global_avg_pool(last_layer, output_length=representation_dim, use_bias=True, scope='gp')
+        print('Encoder GP Dims: ' + str(context.get_shape().as_list()))
 
         context = tf.reshape(context, [batch_size, num_context_patches, num_context_patches, -1])
         print('Context Dims: ' + str(context.get_shape().as_list()))
@@ -533,8 +593,6 @@ def fine_tune(model_path, b_freeze=False):
 
 
 def pretrain(model_path):
-    trX = np.empty([0, input_height, input_width, 3], dtype=int)
-
     dir_list = os.listdir(imgs_dirname)
     dir_list.sort(key=str.lower)
 
@@ -542,14 +600,7 @@ def pretrain(model_path):
 
     with tf.device('/device:CPU:0'):
         X = tf.placeholder(tf.float32, [batch_size * mini_batch_size, patch_height, patch_width, num_channel])
-
-        for idx, labelname in enumerate(dir_list):
-            imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname), use_augmentation=True)
-            #print(trX.shape, imgs_list.shape)
-            trX = np.concatenate((trX, imgs_list), axis=0)
-
-        #print(trX.shape)
-        trX = trX.reshape((-1, input_height, input_width, num_channel))
+        trX = dir_list
 
     b_train = tf.placeholder(tf.bool)
 
@@ -578,27 +629,20 @@ def pretrain(model_path):
             print('Start New Training. Wait ...')
 
         for e in range(num_epoch):
-            training_batches = zip(range(0, len(trX), batch_size),
-                                   range(batch_size, len(trX) + 1, batch_size))
-
             trX = shuffle(trX)
             iteration = 0
 
-            for start, end in training_batches:
-                patches = np.empty([0, patch_height, patch_width, num_channel])
+            for input_file in trX:
+                fullname = os.path.join(imgs_dirname, input_file).replace("\\", "/")
 
-                for i in range(batch_size):
-                    p = prepare_patches(trX[start + i], patch_size=[patch_height, patch_width],
-                                        patch_dim=[num_context_patches, num_context_patches], stride=patch_height//2)
-                    patches = np.concatenate((patches, p), axis=0)
-
+                patches = prepare_patches_from_file(fullname, patch_size=[patch_height, patch_width], patch_dim=[num_context_patches, num_context_patches], stride=patch_height//2)
                 _, l, s_logit, c_logits = sess.run([optimizer, cpc_loss, softmax_cpc_logits, cpc_logits],
-                                feed_dict={X: patches, b_train: True})
+                                                   feed_dict={X: patches, b_train: True})
 
                 iteration = iteration + 1
 
                 if iteration % 10 == 0:
-                    #print('epoch: ' + str(e) + ', loss: ' + str(l) + ', softmax: ' + str(s_logit[0]) + ', logit: ' + str(c_logits[0]))
+                    # print('epoch: ' + str(e) + ', loss: ' + str(l) + ', softmax: ' + str(s_logit[0]) + ', logit: ' + str(c_logits[0]))
                     print('epoch: ' + str(e) + ', loss: ' + str(l))
 
             try:
@@ -626,8 +670,8 @@ if __name__ == '__main__':
     test_data = args.test_data
 
     # Input Data Dimension
-    input_height = 96
-    input_width = 96
+    input_height = 384 # 96
+    input_width = 384 # 96
     num_channel = 3
 
     # If you divide a image([height, width]) to [p_height, p_width] sized patch,
@@ -637,8 +681,8 @@ if __name__ == '__main__':
     # 1024 // 128 = 8. Counts of total patches = (8 + 7)**2 = 225
 
     # Patch Dimension
-    patch_height = 32
-    patch_width = 32
+    patch_height = 192 # 32
+    patch_width = 192 # 32
 
     # Dense Conv Block Base Channel Depth
     dense_block_depth = 128
@@ -651,11 +695,11 @@ if __name__ == '__main__':
 
     # Number of patches in horizontal / vertical
     # Total counts of patches are num_context_patches**2
-    num_context_patches = 5
+    num_context_patches = 3
 
     # Input data augmentation Setting. See function: load_images_from_folder.
-    scale_size = 110
-    num_aug_patch = 4
+    scale_size = 396 # 110
+    num_aug_patch = 2
 
     # Training parameter
     num_epoch = 10

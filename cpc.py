@@ -31,8 +31,8 @@ def prepare_patches(image, patch_size=[24, 24], patch_dim=[7, 7], stride=12):
     return np.array(patches)
 
 
-def prepare_patches_from_file(file_name, patch_size=[24, 24], patch_dim=[7, 7], stride=12):
-    imgs = load_images(file_name, use_augmentation=True)
+def prepare_patches_from_file(file_name, patch_size=[24, 24], patch_dim=[7, 7], stride=12, use_augmentation=True):
+    imgs = load_images(file_name, use_augmentation=use_augmentation)
     patches = np.empty([0, patch_height, patch_width, num_channel])
 
     for img in imgs:
@@ -55,11 +55,11 @@ def load_images(file_name, use_augmentation=False, add_noise=False):
         n_img = img / 255.0
         images.append(n_img)
 
-        n_img = cv2.flip(img, 1)
-        n_img = n_img / 255.0
-        images.append(n_img)
-
         if use_augmentation is True:
+            n_img = cv2.flip(img, 1)
+            n_img = n_img / 255.0
+            images.append(n_img)
+
             img = cv2.resize(img, dsize=(scale_size, scale_size), interpolation=cv2.INTER_CUBIC)
 
             dy = np.random.random_integers(low=1, high=img.shape[0] - input_height, size=num_aug_patch - 1)
@@ -238,9 +238,9 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
 
         print('Task Layer1: ' + str(x.get_shape().as_list()))
 
+        block_depth = dense_block_depth
         l = x
-
-        l = layers.conv(l, scope='conv1', filter_dims=[5, 5, dense_block_depth], stride_dims=[1, 1],
+        l = layers.conv(l, scope='conv1', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False, dilation=[1, 1, 1, 1])
 
         if norm == 'layer':
@@ -250,29 +250,9 @@ def task(x, activation='relu', output_dim=256, scope='task_network', norm='layer
 
         l = act_func(l)
 
-        block_depth = dense_block_depth
-
         for i in range(15):
             l = layers.add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                   norm=norm, b_train=b_train, scope='block1_' + str(i))
-
-        block_depth = block_depth * 2
-
-        l = layers.conv(l, filter_dims=[3, 3, block_depth], stride_dims=[2, 2], act_func=act_func,
-                                              scope='dense_transition_1', norm=norm, b_train=b_train, use_pool=False)
-
-        l = layers.conv(l, scope='conv2', filter_dims=[3, 3, block_depth], stride_dims=[2, 2], non_linear_fn=None)
-
-        if norm == 'layer':
-            l = layers.layer_norm(l, scope='ln2')
-        elif norm == 'batch':
-            l = layers.batch_norm_conv(l, b_train=b_train, scope='bn2')
-
-        l = act_func(l)
-
-        for i in range(10):
-            l = layers.add_residual_block(l,  filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                   norm=norm, b_train=b_train, scope='block2_' + str(i), use_dilation=True)
+                                          norm=norm, b_train=b_train, scope='block1_' + str(i))
 
         latent = layers.global_avg_pool(l, output_length=output_dim)
 
@@ -489,25 +469,14 @@ def fine_tune(model_path, b_freeze=False):
         Y = tf.placeholder(tf.float32, [batch_size, num_class_per_group])
 
         for idx, labelname in enumerate(dir_list):
-            imgs_list = load_images_from_folder(os.path.join(imgs_dirname, labelname),
-                                                use_augmentation=True, add_noise=False)
-            #print(trX.shape, imgs_list.shape)
+            directory = os.path.join(imgs_dirname, labelname).replace("\\", "/")
+            imgs_file_list = os.listdir(directory)
             label = np.zeros(one_hot_length)
-
-            if labelname == 'Unknown':
-                label += (1.0 / num_class_per_group)
-                print('label:', labelname, label)
-            else:
-                label[idx] += 1
-
-            #print('label:', labelname, label)
-            for idx2, img in enumerate(imgs_list):
+            label[idx] += 1
+            print(labelname + ': '+ str(idx))
+            for file in imgs_file_list:
                 trY.append(label)
-                trX.append(img)
-
-        trX = np.array(trX)
-        trX = trX.reshape((-1, input_height, input_width, num_channel))
-        #print(trX.shape)
+                trX.append(os.path.join(directory, file).replace("\\", "/"))
 
     b_train = tf.placeholder(tf.bool)
 
@@ -573,8 +542,10 @@ def fine_tune(model_path, b_freeze=False):
                 patches = np.empty([0, patch_height, patch_width, num_channel])
 
                 for i in range(batch_size):
-                    p = prepare_patches(trX[start + i], patch_size=[patch_height, patch_width],
-                                        patch_dim=[num_context_patches, num_context_patches], stride=patch_height // 2)
+                    #p = prepare_patches(trX[start + i], patch_size=[patch_height, patch_width],
+                    #                    patch_dim=[num_context_patches, num_context_patches], stride=patch_height // 2)
+                    p = prepare_patches_from_file(trX[start + i], patch_size=[patch_height, patch_width],
+                                        patch_dim=[num_context_patches, num_context_patches], stride=patch_height // 2, use_augmentation=False)
                     patches = np.concatenate((patches, p), axis=0)
 
                 _, l, c = sess.run([class_optimizer, class_loss, confidence_op],
@@ -722,7 +693,7 @@ if __name__ == '__main__':
         num_class_per_group = len(os.listdir(imgs_dirname))
         num_epoch = 20
         batch_size = 8
-        fine_tune(model_path, b_freeze=False)
+        fine_tune(model_path, b_freeze=True)
     elif mode == 'validate':
         num_class_per_group = len(os.listdir(label_directory))
         batch_size = 1
